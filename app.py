@@ -22,19 +22,18 @@ def predict():
     data = request.json
     text = data.get('text', '').lower()
     
-    # Kelime bazlı kontrol (Keyword Search) - Hata payını sıfıra indirir
-    found_fabric = None
-    if any(x in text for x in ['cotton', 'pamuk', 'penye']): found_fabric = 'Cotton'
-    elif any(x in text for x in ['denim', 'kot', 'jean']): found_fabric = 'Denim'
-    elif any(x in text for x in ['wool', 'yün', 'triko', 'kazak']): found_fabric = 'Wool'
-    elif any(x in text for x in ['silk', 'ipek', 'saten', 'satin']): found_fabric = 'Silk'
-
-    if found_fabric:
-        fabric = found_fabric
-    else:
-        vec = tfidf.transform([text])
-        pred = model.predict(vec)[0]
-        fabric = le.inverse_transform([pred])[0]
+    # 1. AI TAHMİNİ (Önce AI'ya soralım, o daha objektif)
+    vec = tfidf.transform([text])
+    pred = model.predict(vec)[0]
+    fabric = le.inverse_transform([pred])[0]
+    
+    # 2. GARANTİ KONTROL (Sadece AI çok emin değilse veya net kelime varsa)
+    # Eğer başlıkta çok net bir kelime geçiyorsa AI'yı doğrula
+    if 'pamuk' in text or 'cotton' in text: fabric = 'Cotton'
+    elif 'yün' in text or 'wool' in text: fabric = 'Wool'
+    elif 'ipek' in text or 'silk' in text: fabric = 'Silk'
+    # Denim'i en sona bırakalım veya sadece çok temizse kabul edelim
+    elif 'denim' in text and len(text) < 200: fabric = 'Denim' 
 
     return jsonify({
         'fabric': fabric,
