@@ -22,19 +22,34 @@ def predict():
     data = request.json
     text = data.get('text', '').lower()
     
-    # 1. AI TAHMİNİ (Önce AI'ya soralım, o daha objektif)
-    vec = tfidf.transform([text])
-    pred = model.predict(vec)[0]
-    fabric = le.inverse_transform([pred])[0]
+    # --- AYIRT EDİCİ SKOR TABLOSU ---
+    scores = {'Cotton': 0, 'Denim': 0, 'Silk': 0, 'Wool': 0}
     
-    # 2. GARANTİ KONTROL (Sadece AI çok emin değilse veya net kelime varsa)
-    # Eğer başlıkta çok net bir kelime geçiyorsa AI'yı doğrula
-    if 'pamuk' in text or 'cotton' in text: fabric = 'Cotton'
-    elif 'yün' in text or 'wool' in text: fabric = 'Wool'
-    elif 'ipek' in text or 'silk' in text: fabric = 'Silk'
-    # Denim'i en sona bırakalım veya sadece çok temizse kabul edelim
-    elif 'denim' in text and len(text) < 200: fabric = 'Denim' 
+    # 1. Kelime Bazlı Puanlama (Point System)
+    # COTTON
+    if any(x in text for x in ['pamuk', 'cotton', 'penye', 'vual', 'atlet']): scores['Cotton'] += 15
+    # DENIM (Pamuk içermesine rağmen Kot kelimeleri Denim'i yukarı taşır)
+    if any(x in text for x in ['jean', 'denim', 'kot', 'indigo', 'taşlanmış']): scores['Denim'] += 20
+    # SILK
+    if any(x in text for x in ['ipek', 'silk', 'saten', 'satin', 'şifon', 'parlak', 'shiny']): scores['Silk'] += 15
+    # WOOL
+    if any(x in text for x in ['yün', 'wool', 'triko', 'kazak', 'hırka', 'sıcak', 'winter']): scores['Wool'] += 15
 
+    # 2. AI Tahmin Desteği (Model birini seçerse ona ek puan veririz)
+    vec = tfidf.transform([text])
+    pred_idx = model.predict(vec)[0]
+    ai_choice = le.inverse_transform([pred_idx])[0]
+    scores[ai_choice] += 10 # AI'ya 10 puanlık 'uzman görüşü' ekle
+
+    # En yüksek puanı alanı seç
+    fabric = max(scores, key=scores.get)
+    
+    # Eğer hiç puan toplanamadıysa (Hiç kelime yoksa) AI ne derse o olsun
+    if sum(scores.values()) < 5:
+        fabric = ai_choice
+
+    print(f"Tahmin: {fabric} | Skorlar: {scores}")
+    
     return jsonify({
         'fabric': fabric,
         'command': COMMANDS.get(fabric, '0')
