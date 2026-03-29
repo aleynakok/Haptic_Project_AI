@@ -1,56 +1,106 @@
 import os
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+import re
 import joblib
 import numpy as np
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from urllib.parse import unquote
 
 app = Flask(__name__)
 CORS(app)
 
+MODELS = {}
 try:
-    model = joblib.load('haptic_ai_model.pkl')
     tfidf = joblib.load('tfidf_vectorizer.pkl')
     le = joblib.load('label_encoder.pkl')
-    print("Modeller başarıyla yüklendi!")
+    
+    model_list = ['rf', 'lr', 'nb', 'svm']
+    for name in model_list:
+        path = f'model_{name}.pkl'
+        if os.path.exists(path):
+            MODELS[name] = joblib.load(path)
+    
+    print(f"Sistem Hazır! {len(MODELS)} farklı model yarışmaya katılacak.")
 except Exception as e:
-    print(f"Model yükleme hatası: {e}. Lütfen yeni .pkl dosyalarını Render'a yükleyin.")
+    print(f"Model yükleme hatası: {e}")
 
 COMMANDS = {
     'ipek': '1', 
     'pamuk': '3', 
     'denim': '5', 
-    'yün': '6'
+    'yün': '6',
+    'keten': '4',
+    'sentetik': '2'
 }
+
+def clean_text(text):
+    text = unquote(str(text))
+    # URL'den ürün ismini çek
+    match = re.search(r'/([^/]+)-p-\d+', text)
+    if match: 
+        text = match.group(1)
+    else: 
+        text = text.split('/')[-1]
+    
+    text = text.replace('İ', 'i').replace('I', 'ı').lower()
+    text = re.sub(r'[^a-zığüşöç ]', ' ', text)
+    return text.strip()
 
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
-    raw_text = data.get('text', '').lower()
+    raw_input = data.get('text', '')
     
-    # --- 1. ADIM: AI MODEL TAHMİNİ (Artık daha güçlü) ---
-    vec = tfidf.transform([raw_text])
-    probs = model.predict_proba(vec)[0] # Olasılıkları al [0.1, 0.8, 0.05, 0.05] gibi
-    max_idx = np.argmax(probs)
-    ai_choice = le.inverse_transform([max_idx])[0]
-    ai_confidence = probs[max_idx] # En yüksek olasılık değeri (0.0 ile 1.0 arası)
+    if not raw_input:
+        return jsonify({'error': 'Metin bulunamadı'}), 400
 
-    # --- 2. ADIM: MANUEL DESTEK (Bonus Puan) ---
-    # Eğer metinde "Materyal" veya "%" varsa AI'nın kararına olan güvenimizi artıralım
+    cleaned = clean_text(raw_input)
+    vec = tfidf.transform([cleaned])
+    
+    predictions = []
+
+    for name, model in MODELS.items():
+        try:
+            probs = model.predict_proba(vec)[0]
+            max_idx = np.argmax(probs)
+            
+            confidence = probs[max_idx]
+            fabric_name = le.inverse_transform([max_idx])[0]
+            
+            predictions.append({
+                'model': name,
+                'fabric': fabric_name,
+                'confidence': confidence
+            })
+        except:
+            continue
+
+    if not predictions:
+        return jsonify({'error': 'Tahmin yapılamadı'}), 500
+
+    winner = max(predictions, key=lambda x: x['confidence'])
+    
+    final_fabric = winner['fabric']
+    final_conf = winner['confidence']
+
+    # Teknik kelimeler varsa güven skorunu biraz daha artır
     bonus = 1.0
-    if any(x in raw_text for x in ['materyal', 'içerik', 'kumaş', 'composition', '%']):
-        bonus = 1.2 # %20 güven artışı
+    if any(x in cleaned for x in ['materyal', 'içerik', 'kumaş', '%', 'cotton', 'silk', 'wool']):
+        bonus = 1.15
 
-    final_confidence = min(ai_confidence * bonus * 100, 99) # 0-99 arası skor
+    display_score = min(final_conf * bonus * 100, 99)
 
     return jsonify({
-        'fabric': ai_choice,
-        'confidence': f"%{int(final_confidence)}",
-        'command': COMMANDS.get(ai_choice, '0')
+        'fabric': final_fabric,
+        'confidence': f"%{int(display_score)}",
+        'model_used': winner['model'], 
+        'command': COMMANDS.get(final_fabric, '0'),
+        'cleaned_text': cleaned
     })
 
 @app.route('/', methods=['GET'])
 def home():
-    return "Haptic AI Kumaş Tahmin Servisi Çalışıyor!"
+    return f"Haptic AI Aktif! Yüklü Model Sayısı: {len(MODELS)}"
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
