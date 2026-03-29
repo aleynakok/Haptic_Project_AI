@@ -7,8 +7,6 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
-# --- MODELLERİ YÜKLE ---
-# Yeni eğittiğin (Türkçe etiketli) modelleri yükler
 try:
     model = joblib.load('haptic_ai_model.pkl')
     tfidf = joblib.load('tfidf_vectorizer.pkl')
@@ -17,7 +15,6 @@ try:
 except Exception as e:
     print(f"Model yükleme hatası: {e}. Lütfen yeni .pkl dosyalarını Render'a yükleyin.")
 
-# ESP32 için komut eşleştirmesi (CSV'deki yeni etiketlere göre)
 COMMANDS = {
     'ipek': '1', 
     'pamuk': '3', 
@@ -28,61 +25,27 @@ COMMANDS = {
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
-    # Sayfadan gelen ham metni al
     raw_text = data.get('text', '').lower()
     
-    # --- 1. ADIM: MANUEL SKORLAMA (Keyword Scoring) ---
-    # Kesin anahtar kelimeler yakalanırsa AI'ya destek olur
-    scores = {'pamuk': 0, 'denim': 0, 'ipek': 0, 'yün': 0}
-    
-    # Yüksek niyetli kelimeler (multiplier sistemi)
-    is_high_intent = any(x in raw_text for x in ['materyal', 'içerik', 'kumaş', 'composition', '%', 'detay'])
-    multiplier = 2.5 if is_high_intent else 1.0
+    # --- 1. ADIM: AI MODEL TAHMİNİ (Artık daha güçlü) ---
+    vec = tfidf.transform([raw_text])
+    probs = model.predict_proba(vec)[0] # Olasılıkları al [0.1, 0.8, 0.05, 0.05] gibi
+    max_idx = np.argmax(probs)
+    ai_choice = le.inverse_transform([max_idx])[0]
+    ai_confidence = probs[max_idx] # En yüksek olasılık değeri (0.0 ile 1.0 arası)
 
-    # PAMUK (Cotton)
-    if any(x in raw_text for x in ['pamuk', 'cotton', 'penye', 'vual', 'poplin']): 
-        scores['pamuk'] += 15 * multiplier
-    
-    # DENIM
-    if any(x in raw_text for x in ['jean', 'denim', 'kot', 'indigo', 'taşlanmış']): 
-        scores['denim'] += 20 * multiplier
-    
-    # IPEK (Silk / Satin)
-    if any(x in raw_text for x in ['ipek', 'silk', 'saten', 'satin', 'şifon', 'medine ipeği']): 
-        scores['ipek'] += 15 * multiplier
-    
-    # YÜN (Wool / Knit)
-    if any(x in raw_text for x in ['yün', 'wool', 'triko', 'kazak', 'hırka', 'kaşe', 'kase', 'kaban']): 
-        scores['yün'] += 15 * multiplier
+    # --- 2. ADIM: MANUEL DESTEK (Bonus Puan) ---
+    # Eğer metinde "Materyal" veya "%" varsa AI'nın kararına olan güvenimizi artıralım
+    bonus = 1.0
+    if any(x in raw_text for x in ['materyal', 'içerik', 'kumaş', 'composition', '%']):
+        bonus = 1.2 # %20 güven artışı
 
-    # --- 2. ADIM: AI MODEL TAHMİNİ ---
-    try:
-        vec = tfidf.transform([raw_text])
-        # Sınıf olasılıklarını al (Hangi kumaşa ne kadar benziyor?)
-        probs = model.predict_proba(vec)[0]
-        max_prob_idx = np.argmax(probs)
-        ai_choice = le.inverse_transform([max_prob_idx])[0]
-        ai_confidence = probs[max_prob_idx]
+    final_confidence = min(ai_confidence * bonus * 100, 99) # 0-99 arası skor
 
-        # AI Tahminini skor sistemine ekle (AI'nın güvenine göre puan ver)
-        scores[ai_choice] += (ai_confidence * 12) # AI güveni yüksekse daha çok puan
-    except:
-        ai_choice = 'pamuk' # Hata durumunda default
-
-    # --- 3. ADIM: KARAR VE SONUÇ ---
-    # En yüksek puana sahip kumaşı seç
-    fabric = max(scores, key=scores.get)
-    
-    # Eğer metin çok kısaysa veya hiç skor toplanamadıysa doğrudan AI'ya güven
-    if sum(scores.values()) < 5:
-        fabric = ai_choice
-
-    # Sonucu Uzantıya (ve oradan ESP32'ye) Gönder
     return jsonify({
-        'fabric': fabric,
-        'confidence': f"%{int(scores[fabric])}", # İçsel güven skoru
-        'command': COMMANDS.get(fabric, '0'),
-        'ai_suggested': ai_choice # Debug amaçlı eklendi
+        'fabric': ai_choice,
+        'confidence': f"%{int(final_confidence)}",
+        'command': COMMANDS.get(ai_choice, '0')
     })
 
 @app.route('/', methods=['GET'])
