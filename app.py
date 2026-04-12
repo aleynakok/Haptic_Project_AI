@@ -83,7 +83,8 @@ def predict():
     final_score = min(final_conf_raw * bonus * 100, 99) 
 
     return jsonify({
-        'fabric': final_fabric,
+        'fabric_type': final_fabric, 
+        'fabric': final_fabric,      
         'confidence': f"%{int(final_score)}",
         'command': COMMANDS.get(final_fabric, '0'),
         'method': 'Soft Voting (Demokratik Seçim)',
