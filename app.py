@@ -26,11 +26,11 @@ except Exception as e:
 
 COMMANDS = {
     'ipek': '1', 
-    'pamuk': '3', 
-    'denim': '5', 
-    'yün': '6',
-    'keten': '4',
-    'sentetik': '2'
+    'pamuk': '2', 
+    'denim': '3', 
+    'yün': '4',
+    'keten': '5',
+    'sentetik': '6'
 }
 
 def clean_text(text):
