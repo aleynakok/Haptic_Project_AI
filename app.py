@@ -20,17 +20,17 @@ try:
         if os.path.exists(path):
             MODELS[name] = joblib.load(path)
     
-    print(f"Sistem Hazır! {len(MODELS)} model ile Ortak Akıl (Soft Voting) devrede.")
+    print(f"System Ready! {len(MODELS)} models loaded with Soft Voting.")
 except Exception as e:
-    print(f"KRİTİK HATA: Modeller yüklenemedi! Hata: {e}")
+    print(f"CRITICAL ERROR: Models not loaded! Error: {e}")
 
 COMMANDS = {
-    'ipek': '1', 
-    'pamuk': '2', 
+    'silk': '1', 
+    'cotton': '2', 
     'denim': '3', 
-    'yün': '4',
-    #'keten': '5',
-    #'sentetik': '6'
+    'wool': '4',
+    'linen': '5',
+    'synthetic': '6'
 }
 
 def clean_text(text):
@@ -51,7 +51,7 @@ def predict():
     raw_input = data.get('text', '')
     
     if not raw_input:
-        return jsonify({'error': 'İçerik boş'}), 400
+        return jsonify({'error': 'Input empty'}), 400
 
     cleaned = clean_text(raw_input)
     vec = tfidf.transform([cleaned])
@@ -63,38 +63,45 @@ def predict():
             probs = model.predict_proba(vec)[0]
             all_model_probabilities.append(probs)
         except Exception as e:
-            print(f"Model {name} tahmin hatası: {e}")
+            print(f"Model {name} prediction error: {e}")
             continue
 
     if not all_model_probabilities:
-        return jsonify({'error': 'Tahmin motoru çalışmadı'}), 500
+        return jsonify({'error': 'Prediction engine failed'}), 500
 
     avg_probs = np.mean(all_model_probabilities, axis=0)
-
     best_idx = np.argmax(avg_probs)
-    final_fabric = le.inverse_transform([best_idx])[0]
+    
     final_conf_raw = avg_probs[best_idx]
+    threshold = 0.50  
+
+    if final_conf_raw < threshold:
+        final_fabric = "other"
+        command = "0"
+    else:
+        final_fabric = le.inverse_transform([best_idx])[0]
+        command = COMMANDS.get(final_fabric, '0')
 
     bonus = 1.0
-    technical_keywords = ['materyal', 'içerik', 'kumaş', 'composition', '%', 'cotton', 'wool', 'silk', 'keten']
+    technical_keywords = ['materyal', 'içerik', 'kumaş', 'composition', '%', 'cotton', 'wool', 'silk', 'linen', 'polyester']
     if any(x in cleaned for x in technical_keywords):
-        bonus = 1.15 # %15 artış
+        bonus = 1.15
 
-    final_score = min(final_conf_raw * bonus * 100, 99) 
+    display_score = min(final_conf_raw * bonus * 100, 99) 
 
     return jsonify({
         'fabric_type': final_fabric, 
         'fabric': final_fabric,      
-        'confidence': f"%{int(final_score)}",
-        'command': COMMANDS.get(final_fabric, '0'),
-        'method': 'Soft Voting (Demokratik Seçim)',
+        'confidence': f"%{int(display_score)}",
+        'command': command,
+        'method': 'Soft Voting with Threshold',
         'model_details': {name: f"%{int(p[best_idx]*100)}" for name, p in zip(MODELS.keys(), all_model_probabilities)},
         'cleaned_text': cleaned
     })
 
 @app.route('/', methods=['GET'])
 def home():
-    return f"Haptic AI Servisi Aktif! Yüklü Model Sayısı: {len(MODELS)}"
+    return f"Haptic AI Service Active! Models: {len(MODELS)}"
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
