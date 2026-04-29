@@ -35,6 +35,9 @@ COMMANDS = {
 
 def clean_text(text):
     text = unquote(str(text))
+    
+    text = text.split('?')[0] 
+    
     match = re.search(r'/([^/]+)-p-\d+', text)
     if match: 
         text = match.group(1)
@@ -43,7 +46,12 @@ def clean_text(text):
     
     text = text.replace('İ', 'i').replace('I', 'ı').lower()
     text = re.sub(r'[^a-zığüşöç ]', ' ', text)
-    return text.strip()
+    
+    cleaned = " ".join(text.split()).strip()
+    
+    print(f"DEBUG - AI Input: {cleaned}")
+    
+    return cleaned
 
 @app.route('/predict', methods=['POST'])
 def predict():
