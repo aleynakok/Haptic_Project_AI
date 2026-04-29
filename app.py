@@ -35,23 +35,18 @@ COMMANDS = {
 
 def clean_text(text):
     text = unquote(str(text))
-    
     text = text.split('?')[0] 
     
     match = re.search(r'/([^/]+)-p-\d+', text)
     if match: 
         text = match.group(1)
     else: 
-        text = text.split('/')[-1]
+        text = text.replace('https://', '').replace('www.', '')
+        text = re.sub(r'[/_\-]', ' ', text)
     
     text = text.replace('İ', 'i').replace('I', 'ı').lower()
     text = re.sub(r'[^a-zığüşöç ]', ' ', text)
-    
-    cleaned = " ".join(text.split()).strip()
-    
-    print(f"DEBUG - AI Input: {cleaned}")
-    
-    return cleaned
+    return " ".join(text.split()).strip()
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -79,30 +74,32 @@ def predict():
 
     avg_probs = np.mean(all_model_probabilities, axis=0)
     best_idx = np.argmax(avg_probs)
-    
     final_conf_raw = avg_probs[best_idx]
-    threshold = 0.50  
 
-    if final_conf_raw < threshold:
+    bonus = 1.0
+    technical_keywords = ['pamuk', 'ipek', 'yün', 'keten', 'cotton', 'wool', 'silk', 'linen', 'denim', 'kot']
+    if any(x in cleaned for x in technical_keywords):
+        bonus = 1.2 
+    
+    final_score_with_bonus = final_conf_raw * bonus
+
+    threshold = 0.35  
+
+    if final_score_with_bonus < threshold:
         final_fabric = "other"
         command = "0"
     else:
         final_fabric = le.inverse_transform([best_idx])[0]
         command = COMMANDS.get(final_fabric, '0')
 
-    bonus = 1.0
-    technical_keywords = ['materyal', 'içerik', 'kumaş', 'composition', '%', 'cotton', 'wool', 'silk', 'linen', 'polyester']
-    if any(x in cleaned for x in technical_keywords):
-        bonus = 1.15
-
-    display_score = min(final_conf_raw * bonus * 100, 99) 
-
+    display_score = min(final_score_with_bonus * 100, 99) 
+        
     return jsonify({
         'fabric_type': final_fabric, 
         'fabric': final_fabric,      
         'confidence': f"%{int(display_score)}",
         'command': command,
-        'method': 'Soft Voting with Threshold',
+        'method': 'Soft Voting with Threshold & Bonus',
         'model_details': {name: f"%{int(p[best_idx]*100)}" for name, p in zip(MODELS.keys(), all_model_probabilities)},
         'cleaned_text': cleaned
     })
